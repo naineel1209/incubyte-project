@@ -1,0 +1,51 @@
+services:
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: skypoints-spark-master
+    user: root
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: "7077"
+      SPARK_MASTER_WEBUI_PORT: "8080"
+      PYTHONPATH: /opt/skypoints/jobs/spark
+    ports:
+      - "18080:8080"
+      - "7077:7077"
+    volumes:
+      - ./conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./jobs:/opt/skypoints/jobs:ro
+      - ./data:/opt/skypoints-data
+      - spark_ivy_cache:/opt/spark/.ivy2
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /opt/spark/sbin/start-master.sh
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: skypoints-spark-worker
+    user: root
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_WORKER_CORES: "4"
+      SPARK_WORKER_MEMORY: 4g
+      SPARK_MASTER: spark://spark-master:7077
+      SPARK_WORKER_WEBUI_PORT: "8081"
+      PYTHONPATH: /opt/skypoints/jobs/spark
+    ports:
+      - "18081:8081"
+    volumes:
+      - ./conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./jobs:/opt/skypoints/jobs:ro
+      - ./data:/opt/skypoints-data
+      - spark_ivy_cache:/opt/spark/.ivy2
+    depends_on:
+      - spark-master
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /opt/spark/sbin/start-worker.sh spark://spark-master:7077
+
+volumes:
+  spark_ivy_cache:

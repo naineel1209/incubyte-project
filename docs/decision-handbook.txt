@@ -1,0 +1,20 @@
+SkyPoints Decision Log
+
+This file confirms accepted design decisions.
+
+Decision: Complete write flow
+Confirmation: Read the daily member flat file and redemption JSON file from local input directories. Write Raw Delta, Staging Delta, Target Delta, and export files.
+
+Decision: Processing platform
+Confirmation: Use Docker, Apache Spark, and Delta Lake. Do not use Snowflake or MinIO.
+
+Decision: Local storage
+Confirmation: Mount the host data/ directory in both Spark containers at /opt/skypoints-data/. Use local file:/// Delta paths.
+
+Decision: Country targets
+Confirmation: Store members in one partitioned Delta target by country_code. Do not create physical country tables dynamically.
+
+Decision: Country outputs
+Confirmation: Produce country-specific views or export files from the target Delta table.
+
+Add new accepted decisions to this log ---- 
