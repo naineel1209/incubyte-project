@@ -1,0 +1,13 @@
+{
+  "member_id": "100000000005",
+  "feed_date": "20240117",
+  "redemptions": [
+    {
+      "txn_id": "RX202401170001",
+      "txn_date": "20240117",
+      "partner": "SkyPoints",
+      "miles_redeemed": 3000,
+      "status": "PENDING"
+    }
+  ]
+}

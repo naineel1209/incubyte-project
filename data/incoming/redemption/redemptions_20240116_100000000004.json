@@ -1,0 +1,13 @@
+{
+  "member_id": "100000000004",
+  "feed_date": "20240116",
+  "redemptions": [
+    {
+      "txn_id": "RX202401160002",
+      "txn_date": "20240112",
+      "partner": "PacificAir",
+      "miles_redeemed": 9000,
+      "status": "COMPLETED"
+    }
+  ]
+}

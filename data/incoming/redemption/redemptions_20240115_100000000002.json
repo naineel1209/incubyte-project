@@ -1,0 +1,13 @@
+{
+  "member_id": "100000000002",
+  "feed_date": "20240115",
+  "redemptions": [
+    {
+      "txn_id": "RX202401150003",
+      "txn_date": "20240114",
+      "partner": "IndiFly",
+      "miles_redeemed": 8500,
+      "status": "COMPLETED"
+    }
+  ]
+}
