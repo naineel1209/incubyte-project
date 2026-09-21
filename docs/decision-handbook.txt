@@ -17,4 +17,13 @@ Confirmation: Store members in one partitioned Delta target by country_code. Do 
 Decision: Country outputs
 Confirmation: Produce country-specific views or export files from the target Delta table.
 
-Add new accepted decisions to this log ---- 
+Add new accepted decisions to this log ----
+
+Decision: Generate Sample files using Agent
+Confirmation: Use AI Agent to defer work of generating sample records to be ingested - Generated txt files using Agent and JSON files for redemption
+
+Decision: Raw layer Control table: source_path and ingestion time - we will use this to filter out those records that have already been ingested
+
+Decision: Raw layer schema - we will use a simple schema with the following fields: source_path, raw_record, and ingestion_time and then split the raw_record on pipe to get the individual fields for the staging layer
+
+Decision: Staging layer schema - we will use a schema with the following fields: member_id, first_name, last_name, email, country_code, and ingestion_time. We will also add a partition column for country_code to optimize queries.
