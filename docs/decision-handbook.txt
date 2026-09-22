@@ -24,6 +24,9 @@ Confirmation: Use AI Agent to defer work of generating sample records to be inge
 
 Decision: Raw layer Control table: source_path and ingestion time - we will use this to filter out those records that have already been ingested
 
+Decision: Control table lookup scale
+Confirmation: Collect only processed source paths from the control table. The table stores one row per file, not one row per source record.
+
 Decision: Raw layer schema - we will use a simple schema with the following fields: source_path, raw_record, and ingestion_time and then split the raw_record on pipe to get the individual fields for the staging layer
 
 Decision: Staging layer schema - we will use a schema with the following fields: member_id, first_name, last_name, email, country_code, and ingestion_time. We will also add a partition column for country_code to optimize queries.
@@ -31,6 +34,10 @@ Decision: Staging layer schema - we will use a schema with the following fields:
 Decision: Target Layer - we will create a consolidated target layer with the latest member records for member_id and then we can create country-specific views or export files from this target layer. We will use Delta Lake's MERGE operation to update the target layer with new records from the staging layer.
 
 Decision: Exports Layer - additional country files confused me a lot initially, so what I could come up with was a stable exports layer - Country specific tables go in the exports folder as well as the files that have been exported - Each country that we know have a export function associated with - so as and when required - we can add a new export function for a new country that we want to track and run the script back - we will get those records loaded - Now, this can be an issue - becuase records are in billions - so A better architecture would be a view on top of the target table layer - Then we can also just simply define the views as DDL statments and our exports script would be limited to defining country specific exports layer
+
+Decision: using Pandas - using Pandas for exporting the data to CSV files and Excel files - so as to stabilize on the file output naming conventions. Using Spark to export CSVs and Excel would be a bit of a pain - so we will use Pandas for this - and we will use Spark to read the data from the target layer and then convert it to Pandas and then export it to CSVs and Excel files
+
+Decision: Philippines Export: I didn't assume a Philippines file export without an output template. Keep Philippines data in the country-partitioned Delta target until we have a clear sample export
 
 Decision: Redemtpion Layer - simply read the redemption file - rank the records locally and then on the target table itself - we can get a flattened table finally in the target layer - which can then be directly used to query the data and write sqls and stuff
 
