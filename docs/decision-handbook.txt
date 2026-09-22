@@ -29,3 +29,12 @@ Decision: Raw layer schema - we will use a simple schema with the following fiel
 Decision: Staging layer schema - we will use a schema with the following fields: member_id, first_name, last_name, email, country_code, and ingestion_time. We will also add a partition column for country_code to optimize queries.
 
 Decision: Target Layer - we will create a consolidated target layer with the latest member records for member_id and then we can create country-specific views or export files from this target layer. We will use Delta Lake's MERGE operation to update the target layer with new records from the staging layer.
+
+Decision: Exports Layer - additional country files confused me a lot initially, so what I could come up with was a stable exports layer - Country specific tables go in the exports folder as well as the files that have been exported - Each country that we know have a export function associated with - so as and when required - we can add a new export function for a new country that we want to track and run the script back - we will get those records loaded - Now, this can be an issue - becuase records are in billions - so A better architecture would be a view on top of the target table layer - Then we can also just simply define the views as DDL statments and our exports script would be limited to defining country specific exports layer
+
+Decision: Redemtpion Layer - simply read the redemption file - rank the records locally and then on the target table itself - we can get a flattened table finally in the target layer - which can then be directly used to query the data and write sqls and stuff
+
+Major Decision: Why Delta Lake - because for quick turnarounds and fast and stable movability - delta lakes are great and otherwise also they are great to work with and very easy as there are no warehouse mounting issues and etc.
+Other way we could have worked on this will be to setup a spark.sql.catalog.spark_default - and setup a local file based warehouse - then we could have easily see the local data and query local data as well
+
+Why Spark on Docker Compose - Simply because - easy to reproduce - I have already worked on this kind of stuff - so my familiarity with the setup and the ease of use - I can easily setup a spark cluster on my local machine and then run the code and test it - Also, I can easily share the docker-compose file with others and they can easily run the same setup on their local machines as well

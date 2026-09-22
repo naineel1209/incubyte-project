@@ -152,6 +152,8 @@ def main() -> None:
             .execute()
         )
 
+    # Technical Assessment: Deliverable 3: Country Specific tables write - Chose Overwrite here - as some members might have moved countries - so our target table got updated - to have that data flow through, we can simply overwrite the country specific tables -
+    # A better approach would've been using views but since the requirement asks us specifically "country specific tables", I have chose this option
     write_country_targets(spark)
 
     # Mark files as processed only after the target update succeeds.

@@ -1,4 +1,5 @@
 data/delta/*
 data/exports/*
+data/control/*
 data/quarantine/*
 __pycache__/

@@ -1,3 +1,4 @@
+-- Technical Assessment: Deliverable 1: Separate DDL of each tables we are touching, second option is to use a stable script controlled table creation with schema management in script itself
 CREATE TABLE IF NOT EXISTS member_profile_raw (
     source_path STRING,
     raw_record STRING,
