@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS member_profile_raw (
     source_path STRING,
     raw_record STRING,
+    source_file_date DATE,
     ingestion_time TIMESTAMP
 )
 USING DELTA
@@ -9,6 +10,7 @@ LOCATION 'file:///opt/skypoints-data/delta/raw/member_profile';
 CREATE TABLE IF NOT EXISTS member_profile_staging (
     source_path STRING,
     ingestion_time TIMESTAMP,
+    source_file_date DATE,
     name STRING,
     mem_id STRING,
     enroll_dt DATE,
@@ -39,7 +41,8 @@ CREATE TABLE IF NOT EXISTS member_profile_target (
     age INT,
     stale_member BOOLEAN,
     source_path STRING,
-    ingestion_time TIMESTAMP
+    ingestion_time TIMESTAMP,
+    source_file_date DATE
 )
 USING DELTA
 PARTITIONED BY (country_code)

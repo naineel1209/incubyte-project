@@ -65,3 +65,33 @@ data/incoming/redemption/
 Read `docs/decision-handbook.txt` before changing the data flow.
 
 The handbook records the accepted source, layer, storage, country, and export decisions.
+
+## Country Targets
+
+The ingestion job writes the global target to:
+
+```text
+data/delta/target/member_profile/
+```
+
+It also writes country-specific Delta targets to:
+
+```text
+data/exports/member/usa/
+data/exports/member/india/
+data/exports/member/australia/
+data/exports/member/philippines/
+```
+
+Run the standalone export job with:
+
+```bash
+make spark-submit-member-exports
+```
+
+Query a country target from Spark SQL with:
+
+```sql
+SELECT *
+FROM delta.`file:///opt/skypoints-data/exports/member/usa`;
+```

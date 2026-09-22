@@ -1,15 +1,18 @@
-from functools import reduce
 from pathlib import Path
 
 from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+from member_profile_exports import write_country_targets
 
 
 INCOMING_MEMBER_DIR = Path("/opt/skypoints-data/incoming/member")
 CONTROL_TABLE_PATH = "/opt/skypoints-data/control/member_profile_control"
 RAW_MEMBER_PATH = "/opt/skypoints-data/delta/raw/member_profile"
 STAGING_MEMBER_PATH = "/opt/skypoints-data/delta/staging/member_profile"
+TARGET_MEMBER_PATH = "/opt/skypoints-data/delta/target/member_profile"
 
 
 def main() -> None:
@@ -45,7 +48,10 @@ def main() -> None:
         spark.read.text(str(file_path)).select(
             F.lit(str(file_path)).alias("source_path"),
             F.col("value").alias("raw_record"),
-            F.current_timestamp().alias("ingestion_time"),
+            F.to_date(
+                F.lit(file_path.stem.rsplit("_", 1)[-1]), "yyyyMMdd"
+            ).alias("source_file_date"),
+            F.current_timestamp().alias("ingestion_time")
         )
         for file_path in files_to_ingest
     ]
@@ -66,6 +72,7 @@ def main() -> None:
         .select(
             "source_path",
             "ingestion_time",
+            "source_file_date",
             F.col("fields").getItem(2).alias("name"),
             F.col("fields").getItem(3).alias("mem_id"),
             F.to_date(F.col("fields").getItem(4), "yyyyMMdd").alias("enroll_dt"), # yyyy (2002) - MM (09, 11) - dd (01, 02, 03)
@@ -96,17 +103,67 @@ def main() -> None:
         }
     )
 
-    # Write the raw_member_dataframe and staging_member_dataframe to their respective Delta tables, and also update the control table with the ingested file paths - if both are successful
+    # Write the raw and staging records before updating the target.
     raw_member_dataframe.write.format("delta").mode("append").save(RAW_MEMBER_PATH)
     staging_member_dataframe.write.format("delta").mode("append").save(
         STAGING_MEMBER_PATH
     )
+
+    # Keep one latest record per member within the current run.
+    ranking_window = Window.partitionBy("mem_id").orderBy(
+        F.col("source_file_date").desc(),
+        F.col("ingestion_time").desc(),
+        F.col("source_path").desc(),
+    )
+    current_batch_latest = (
+        staging_member_dataframe
+        .withColumn("row_number", F.row_number().over(ranking_window))
+        .filter(F.col("row_number") == 1)
+        .drop("row_number")
+    )
+
+    if not DeltaTable.isDeltaTable(spark, TARGET_MEMBER_PATH):
+        (
+            current_batch_latest.write.format("delta")
+            .mode("overwrite")
+            .partitionBy("country_code")
+            .save(TARGET_MEMBER_PATH)
+        )
+    else:
+        target_table = DeltaTable.forPath(spark, TARGET_MEMBER_PATH)
+
+        # Simple condition - rank records by source_file_date and ingestion_time - if the source record is newer than the target record, update the target record with the source record.
+        newer_record = """
+            source.source_file_date > target.source_file_date
+            OR (
+                source.source_file_date = target.source_file_date
+                AND source.ingestion_time > target.ingestion_time
+            )
+        """
+
+        (
+            target_table.alias("target")
+            .merge(
+                current_batch_latest.alias("source"),
+                "target.mem_id = source.mem_id",
+            )
+            .whenMatchedUpdateAll(condition=newer_record)
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+
+    write_country_targets(spark)
+
+    # Mark files as processed only after the target update succeeds.
     (
-        spark.createDataFrame([(str(path),) for path in files_to_ingest], "source_path STRING")
+        spark.createDataFrame(
+            [(str(path),) for path in files_to_ingest], "source_path STRING"
+        )
         .write.format("delta")
         .mode("append")
         .save(CONTROL_TABLE_PATH)
     )
+
     spark.stop()
 
 

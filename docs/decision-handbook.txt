@@ -27,3 +27,5 @@ Decision: Raw layer Control table: source_path and ingestion time - we will use 
 Decision: Raw layer schema - we will use a simple schema with the following fields: source_path, raw_record, and ingestion_time and then split the raw_record on pipe to get the individual fields for the staging layer
 
 Decision: Staging layer schema - we will use a schema with the following fields: member_id, first_name, last_name, email, country_code, and ingestion_time. We will also add a partition column for country_code to optimize queries.
+
+Decision: Target Layer - we will create a consolidated target layer with the latest member records for member_id and then we can create country-specific views or export files from this target layer. We will use Delta Lake's MERGE operation to update the target layer with new records from the staging layer.
