@@ -48,3 +48,30 @@ CREATE TABLE IF NOT EXISTS member_profile_target (
 USING DELTA
 PARTITIONED BY (country_code)
 LOCATION 'file:///opt/skypoints-data/delta/target/member_profile';
+
+-- Technical Assessment: Deliverable 5: Invalid member rows remain queryable in quarantine.
+CREATE TABLE IF NOT EXISTS member_profile_quarantine (
+    source_path STRING,
+    raw_record STRING,
+    source_file_date DATE,
+    ingestion_time TIMESTAMP,
+    record_type STRING,
+    field_count INT,
+    name STRING,
+    mem_id STRING,
+    enroll_dt_raw STRING,
+    flight_dt_raw STRING,
+    tier STRING,
+    agent_name STRING,
+    state STRING,
+    country_code STRING,
+    dob_raw STRING,
+    flag STRING,
+    enroll_dt DATE,
+    flight_dt DATE,
+    dob DATE,
+    validation_errors ARRAY<STRING>,
+    validation_time TIMESTAMP
+)
+USING DELTA
+LOCATION 'file:///opt/skypoints-data/quarantine/member_profile';

@@ -31,6 +31,12 @@ Comments marked `Technical Assessment:` identify the related assessment delivera
 
 Search the repository for `Technical Assessment:` to find these comments.
 
+## Decision Handbook
+
+Read `docs/decision-handbook.txt` before changing the data flow.
+
+The handbook records accepted source, layer, storage, country, and export decisions.
+
 ## Prerequisites
 
 Install Docker and Docker Compose.
@@ -209,6 +215,57 @@ The view definition is in `jobs/spark/sql/redemption_queries.sql`.
 
 The direct Delta path query remains the most reliable local query method.
 
+## Data Validations
+
+The ingestion jobs validate records before staging or target writes.
+
+Invalid records do not enter the queryable target tables.
+
+The jobs append invalid records and validation codes to these quarantine paths:
+
+```text
+data/quarantine/member_profile/
+data/quarantine/redemption_transactions/
+```
+
+Member validations include:
+
+- mandatory `name`, `mem_id`, and `enroll_dt` checks
+- member ID format and maximum length checks
+- pipe-field count, record type, and header checks
+- date parsing, future dates, flight order, and plausible age checks
+- field length, active flag, country code, and supported country checks
+
+Redemption validations include:
+
+- mandatory `member_id`, `txn_id`, dates, partner, miles, and status checks
+- JSON shape and redemption array checks
+- date parsing, future dates, and transaction-to-feed date checks
+- non-negative miles and allowed status checks
+
+The target tables enforce logical key uniqueness after ranking and merging.
+
+The member target key is `mem_id`.
+
+The redemption target key is `(member_id, txn_id)`.
+
+Query validation results with:
+
+```bash
+docker compose exec -T spark-master \
+  spark-sql \
+  --master 'local[2]' \
+  -f /opt/skypoints/jobs/spark/sql/data_validation_queries.sql
+```
+
+Run automated validation tests with:
+
+```bash
+make spark-test-validations
+```
+
+The tests cover mandatory fields, invalid dates, field counts, countries, duplicate keys, status priority, and quarantine writes.
+
 ## Smoke Test
 
 The smoke test writes this path:
@@ -229,8 +286,18 @@ make spark-submit-smoke
 make spark-down
 ```
 
-## Decision Handbook
+## Results
 
-Read `docs/decision-handbook.txt` before changing the data flow.
+These screenshots show the completed Spark flow and query outputs.
 
-The handbook records accepted source, layer, storage, country, and export decisions.
+### Spark Master UI
+
+![Spark master UI](docs/results/spark-master-ui.png)
+
+### Query Results
+
+![Query results](docs/results/query-results.png)
+
+### Additional Query Results
+
+![Additional query results](docs/results/query-results-2.png)

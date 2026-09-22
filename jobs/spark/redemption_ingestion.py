@@ -6,7 +6,16 @@ from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
-from pyspark.sql.window import Window
+
+from data_validations import (
+    REDEMPTION_QUARANTINE_PATH,
+    add_redemption_validation_errors,
+    assert_unique_keys,
+    combine_validation_errors,
+    latest_redemption_records,
+    validation_error,
+    write_quarantine,
+)
 
 
 INCOMING_REDEMPTION_DIR = Path("/opt/skypoints-data/incoming/redemption")
@@ -31,50 +40,105 @@ REDEMPTION_SCHEMA = T.StructType(
                 ),
                 True,
             ),
-            True,
         ),
+        T.StructField("_corrupt_record", T.StringType(), True),
     ]
 )
 
 
 def read_flattened_redemptions(spark: SparkSession, files_to_ingest: list[Path]):
     file_dataframes = []
+    invalid_feed_dataframes = []
+
     for file_path in files_to_ingest:
         file_dataframe = (
             spark.read.option("multiline", "true")
             .schema(REDEMPTION_SCHEMA)
             .json(str(file_path))
-            # exploding redemptions as they are an array
-            .select(
-                "member_id",
-                F.to_date(F.col("feed_date"), "yyyyMMdd").alias("feed_date"),
-                F.explode("redemptions").alias("redemption"),
-                F.lit(str(file_path)).alias("source_path"),
-                F.current_timestamp().alias("ingestion_time"),
+            .withColumn("source_path", F.lit(str(file_path)))
+            .withColumn("ingestion_time", F.current_timestamp())
+            .withColumn("feed_date_raw", F.trim(F.col("feed_date")))
+            .withColumn("feed_date", F.to_date(F.col("feed_date"), "yyyyMMdd"))
+        )
+
+        feed_errors = combine_validation_errors(
+            validation_error(
+                F.col("_corrupt_record").isNotNull(), "INVALID_REDEMPTION_JSON"
+            ),
+            validation_error(
+                F.col("member_id").isNull()
+                | (F.length(F.trim(F.col("member_id"))) == 0),
+                "MISSING_MEMBER_ID",
+            ),
+            validation_error(
+                (F.length(F.trim(F.col("member_id"))) > 18)
+                | (~F.trim(F.col("member_id")).rlike(r"^[0-9]+$")),
+                "INVALID_MEMBER_ID",
+            ),
+            validation_error(
+                F.col("feed_date_raw").isNull()
+                | (F.length(F.col("feed_date_raw")) == 0),
+                "MISSING_FEED_DATE",
+            ),
+            validation_error(
+                F.col("feed_date_raw").isNotNull()
+                & (F.length(F.col("feed_date_raw")) > 0)
+                & F.col("feed_date").isNull(),
+                "INVALID_FEED_DATE",
+            ),
+            validation_error(
+                F.col("feed_date").isNotNull()
+                & (F.col("feed_date") > F.current_date()),
+                "FUTURE_FEED_DATE",
+            ),
+            validation_error(
+                F.col("redemptions").isNull(), "MISSING_REDEMPTIONS_ARRAY"
+            ),
+        )
+        invalid_feed_dataframes.append(
+            file_dataframe.withColumn("validation_errors", feed_errors).filter(
+                F.size("validation_errors") > 0
             )
-            # simple json fields selectors (.) operators
+        )
+
+        # Explode the redemption array into one queryable row per transaction.
+        file_dataframes.append(
+            file_dataframe.filter(F.size("redemptions") > 0)
             .select(
                 "member_id",
+                "feed_date_raw",
                 "feed_date",
-                F.col("redemption.txn_id").alias("txn_id"),
-                F.to_date(
-                    F.col("redemption.txn_date"), "yyyyMMdd"
-                ).alias("txn_date"),
-                F.col("redemption.partner").alias("partner"),
-                F.col("redemption.miles_redeemed").alias("miles_redeemed"),
-                F.col("redemption.status").alias("status"),
+                F.explode("redemptions").alias("redemption"),
                 "source_path",
                 "ingestion_time",
             )
-            .filter(F.col("member_id").isNotNull())
-            .filter(F.col("txn_id").isNotNull())
+            .select(
+                F.trim(F.col("member_id")).alias("member_id"),
+                "feed_date_raw",
+                "feed_date",
+                F.trim(F.col("redemption.txn_id")).alias("txn_id"),
+                F.trim(F.col("redemption.txn_date")).alias("txn_date_raw"),
+                F.to_date(
+                    F.col("redemption.txn_date"), "yyyyMMdd"
+                ).alias("txn_date"),
+                F.trim(F.col("redemption.partner")).alias("partner"),
+                F.col("redemption.miles_redeemed").alias("miles_redeemed"),
+                F.upper(F.trim(F.col("redemption.status"))).alias("status"),
+                "source_path",
+                "ingestion_time",
+            )
         )
-        file_dataframes.append(file_dataframe)
 
     flattened_dataframe = file_dataframes[0]
     for file_dataframe in file_dataframes[1:]:
         flattened_dataframe = flattened_dataframe.unionByName(file_dataframe)
-    return flattened_dataframe
+
+    invalid_feed_dataframe = invalid_feed_dataframes[0]
+    for invalid_dataframe in invalid_feed_dataframes[1:]:
+        invalid_feed_dataframe = invalid_feed_dataframe.unionByName(invalid_dataframe)
+
+    return flattened_dataframe, invalid_feed_dataframe
+
 
 # Technical Assessment: Deliverable 4: Redemption Feed
 def main() -> None:
@@ -103,76 +167,106 @@ def main() -> None:
         spark.stop()
         return
 
-    flattened_dataframe = read_flattened_redemptions(spark, files_to_ingest)
+    flattened_dataframe, invalid_feed_dataframe = read_flattened_redemptions(
+        spark, files_to_ingest
+    )
+    write_quarantine(invalid_feed_dataframe, REDEMPTION_QUARANTINE_PATH)
+
+    validated_redemption_dataframe = add_redemption_validation_errors(
+        flattened_dataframe
+    )
+    write_quarantine(
+        validated_redemption_dataframe.filter(F.size("validation_errors") > 0),
+        REDEMPTION_QUARANTINE_PATH,
+    )
+    valid_redemption_dataframe = validated_redemption_dataframe.filter(
+        F.size("validation_errors") == 0
+    ).drop("validation_errors")
+
     # Ranking on member_id and txn_id - visibly the only identifier but statuses can change and basing on an assumption - feed_date
-    status_priority = (
-        F.when(F.upper(F.col("status")) == "COMPLETED", F.lit(2))
-        .when(F.upper(F.col("status")) == "PENDING", F.lit(1))
-        .otherwise(F.lit(0))
-    )
-    ranking_window = Window.partitionBy("member_id", "txn_id").orderBy(
-        status_priority.desc(),
-        F.col("feed_date").desc_nulls_last(),
-        F.col("ingestion_time").desc_nulls_last(),
-        F.col("source_path").desc(),
-    )
     current_batch_latest = (
-        flattened_dataframe.withColumn(
-            "row_number", F.row_number().over(ranking_window)
+        latest_redemption_records(valid_redemption_dataframe)
+        .select(
+            "member_id",
+            "txn_id",
+            "feed_date",
+            "txn_date",
+            "partner",
+            "miles_redeemed",
+            "status",
+            "source_path",
+            "ingestion_time",
         )
-        .filter(F.col("row_number") == 1)
-        .drop("row_number")
     )
 
-    if not DeltaTable.isDeltaTable(spark, REDEMPTION_TARGET_PATH):
-        (
-            current_batch_latest.write.format("delta")
-            .mode("overwrite")
-            .partitionBy("feed_date")
-            .save(REDEMPTION_TARGET_PATH)
+    has_valid_redemptions = current_batch_latest.limit(1).count() > 0
+    if has_valid_redemptions:
+        assert_unique_keys(
+            current_batch_latest,
+            ["member_id", "txn_id"],
+            "redemption_transactions_current_batch",
         )
-    else:
-        target_table = DeltaTable.forPath(spark, REDEMPTION_TARGET_PATH)
-        # New record has higher priority - wins
-        # New record has same priority - wins
-        newer_record = """
-            CASE UPPER(source.status)
-                WHEN 'COMPLETED' THEN 2
-                WHEN 'PENDING' THEN 1
-                ELSE 0
-            END > CASE UPPER(target.status)
-                WHEN 'COMPLETED' THEN 2
-                WHEN 'PENDING' THEN 1
-                ELSE 0
-            END
-            OR (
+
+        if not DeltaTable.isDeltaTable(spark, REDEMPTION_TARGET_PATH):
+            (
+                current_batch_latest.write.format("delta")
+                .mode("overwrite")
+                .partitionBy("feed_date")
+                .save(REDEMPTION_TARGET_PATH)
+            )
+        else:
+            target_table = DeltaTable.forPath(spark, REDEMPTION_TARGET_PATH)
+            assert_unique_keys(
+                target_table.toDF(),
+                ["member_id", "txn_id"],
+                "redemption_transactions_target_before_merge",
+            )
+            # New record has higher priority - wins
+            # New record has same priority - wins
+            newer_record = """
                 CASE UPPER(source.status)
                     WHEN 'COMPLETED' THEN 2
                     WHEN 'PENDING' THEN 1
                     ELSE 0
-                END = CASE UPPER(target.status)
+                END > CASE UPPER(target.status)
                     WHEN 'COMPLETED' THEN 2
                     WHEN 'PENDING' THEN 1
                     ELSE 0
                 END
-                AND (
-                    source.feed_date > target.feed_date
-                    OR (
-                        source.feed_date = target.feed_date
-                        AND source.ingestion_time > target.ingestion_time
+                OR (
+                    CASE UPPER(source.status)
+                        WHEN 'COMPLETED' THEN 2
+                        WHEN 'PENDING' THEN 1
+                        ELSE 0
+                    END = CASE UPPER(target.status)
+                        WHEN 'COMPLETED' THEN 2
+                        WHEN 'PENDING' THEN 1
+                        ELSE 0
+                    END
+                    AND (
+                        source.feed_date > target.feed_date
+                        OR (
+                            source.feed_date = target.feed_date
+                            AND source.ingestion_time > target.ingestion_time
+                        )
                     )
                 )
+            """
+            (
+                target_table.alias("target")
+                .merge(
+                    current_batch_latest.alias("source"),
+                    "target.member_id = source.member_id AND target.txn_id = source.txn_id",
+                )
+                .whenMatchedUpdateAll(condition=newer_record)
+                .whenNotMatchedInsertAll()
+                .execute()
             )
-        """
-        (
-            target_table.alias("target")
-            .merge(
-                current_batch_latest.alias("source"),
-                "target.member_id = source.member_id AND target.txn_id = source.txn_id",
-            )
-            .whenMatchedUpdateAll(condition=newer_record)
-            .whenNotMatchedInsertAll()
-            .execute()
+
+        assert_unique_keys(
+            spark.read.format("delta").load(REDEMPTION_TARGET_PATH),
+            ["member_id", "txn_id"],
+            "redemption_transactions_target",
         )
 
     (

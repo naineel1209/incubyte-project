@@ -38,3 +38,8 @@ Major Decision: Why Delta Lake - because for quick turnarounds and fast and stab
 Other way we could have worked on this will be to setup a spark.sql.catalog.spark_default - and setup a local file based warehouse - then we could have easily see the local data and query local data as well
 
 Why Spark on Docker Compose - Simply because - easy to reproduce - I have already worked on this kind of stuff - so my familiarity with the setup and the ease of use - I can easily setup a spark cluster on my local machine and then run the code and test it - Also, I can easily share the docker-compose file with others and they can easily run the same setup on their local machines as well
+
+Decision: Validate mandatory fields, data formats, dates, and key uniqueness. Quarantine invalid records before staging and target writes.
+
+Decision: Data Validation Tests
+Use Spark tests to verify validation rules fire at runtime and failed records reach the quarantine layer. Run `make spark-test-validations` to verify the behavior.
